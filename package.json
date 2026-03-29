@@ -1,27 +1,20 @@
 {
-  "name": "infracord",
-  "version": "1.0.0",
-  "description": "A declarative, infrastructure-as-code framework for Discord.js. It allows developers to define categories, channels, and permissions as a static \"blueprint,\" ensuring the server structure is always in sync with the code while providing compile-time type safety for all resources.",
-  "main": "index.js",
+  "name": "infracord-root",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/WaseemAldemeri/infracord.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/WaseemAldemeri/infracord/issues"
-  },
-  "homepage": "https://github.com/WaseemAldemeri/infracord#readme",
   "devDependencies": {
     "@biomejs/biome": "^2.4.9",
     "adr-tool": "^0.3.0",
-    "tsdown": "^0.21.7",
     "typescript": "^6.0.2"
   }
 }
