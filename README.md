@@ -18,6 +18,12 @@ infracord has two layers that work together.
 
 Because everything is defined in TypeScript, you get compile-time type safety and autocompletion throughout — from the channels you declared in your blueprint to the interaction handlers in your features.
 
+## Learn more
+
+- [Philosophy](docs/philosophy.md) — the principles behind infracord and why it is designed the way it is
+- [Architecture overview](docs/architecture/overview.md) — the two layers, how they connect, and how the framework is structured
+- [How the reconciler works](docs/architecture/reconciler.md) — the full pipeline from blueprint to live server
+
 ## Status
 
 Early development. Not ready for production use.
