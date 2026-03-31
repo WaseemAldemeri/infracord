@@ -1,85 +1,65 @@
 # Blueprint API Shape
 
-* Status: accepted
-* Date: 2026-03-29
+* Status: accepted (revised 2026-03-30)
+* Date: 2026-03-30
 
 ## Context and Problem Statement
 
-How should users declare their Discord server's structure in TypeScript? We need to decide how roles, channels, and categories are defined; how the type system enforces correctness; and how structural mistakes are surfaced.
+How should users declare their Discord server's structure in TypeScript? We need to decide how roles, channels, and permission overwrites are defined; how the type system enforces correctness; and how the framework infers all necessary type information without requiring explicit annotations.
 
 ## Decision Drivers
 
-* Role, channel, and category names referenced anywhere in the blueprint must be validated at compile time
-* Channel order must be explicit — Discord uses position to order channels in the sidebar
-* The API should support all Discord guild channel types (text, voice, announcement, stage, forum, media)
-* Structural mistakes (duplicate names) should surface before the reconciler touches the live server
+* Channel and role names must be validated at compile time across the whole codebase
+* Channel types (`text`, `voice`, etc.) must drive autocomplete and field validation — wrong fields on the wrong channel type must be a compile error
+* Permission overwrites must be validated against declared role and channel names with full autocomplete
+* Users should write plain values — no type annotations, no `as const`, no generics
+* `ServerContext` (the internal phantom type) must be invisible to users
 
 ## Considered Options
 
-* **Option A** — Array-based structure with a `ServerContext` phantom type bundling all three name unions
-* **Option B** — Object-keyed structure (`Record<MyChannels, ChannelDef>` for channels)
-* **Option C** — Flat list with no explicit category grouping
+* **Option A** — Explicit `ServerContext` type annotation by the user; array-based structure with embedded channel config
+* **Option B** — Value-driven API: `defineRoles` + `defineChannels` + `createBlueprint` as the connector; `ServerContext` fully inferred
+* **Option C** — Single `createBlueprint` call with everything inline; `ServerContext` inferred from the call
 
 ## Decision Outcome
 
-Chosen option: **Option A**, because it preserves explicit channel ordering (Discord uses position), keeps the structure readable top-to-bottom like a real server sidebar, and the `ServerContext` phantom type means the three name unions are defined once and flow through the entire framework without re-threading three generics everywhere.
+Chosen option: **Option B**. It gives full autocomplete and compile-time validation everywhere — including permission overwrites — without any type annotations. Option C was ruled out because TypeScript infers `roles` and `channels` simultaneously in a single call and cannot use one to contextually type the other, which breaks autocomplete for permission overwrite role names. Option A was ruled out because it forced users to write `ServerContext` annotations that merely restated values already in the blueprint.
 
 ### Positive Consequences
 
-* Channel array order maps directly to Discord channel positions — no separate `position` field needed
-* Discriminated unions on `type` give per-channel-type autocompletion with no extra ceremony
-* All name references (roles, channels, categories) in the blueprint are compile-time checked
-* `Record<Roles<Ctx>, RoleDef>` means a missing or extra role definition is a compile error
-* The same `ServerContext` token flows to `ServerBlueprint`, `ic`, and any future API surface
+* Zero type annotations — purely value-driven
+* `ServerContext` is an internal detail, never written by the user
+* Full autocomplete: channel fields narrow by `type`, channel names validate in `structure`, role names validate in `permissions`
+* `createIc(blueprint)` and `new InfracordClient({ blueprint })` both infer the full server type from one value
 
 ### Negative Consequences
 
-* Duplicate channel/category names cannot be caught at compile time — detected by the dry run instead
-
-## Design Decisions
-
-**`ServerContext` phantom type.** Rather than passing three generics to every class and function, they are bundled into a single phantom type. It holds no runtime value.
-
-```typescript
-type ServerContext<R extends string = string, C extends string = string, K extends string = string> = {
-  readonly _roles: R;
-  readonly _channels: C;
-  readonly _categories: K;
-};
-
-// Usage
-type MyServer = ServerContext<'admin' | 'member', 'general' | 'mod-log', 'Community' | 'Staff'>;
-
-const blueprint = new ServerBlueprint<MyServer>({ ... });
-const ic        = createIc<MyServer>(blueprint); // same token, no re-threading
-```
-
-**Array-based structure.** Categories and top-level channels are declared in an ordered array. Array position maps to Discord channel position.
-
-**Permission overwrite targets.** Role targets are typed as `Roles<Ctx> | '@everyone'` — a compile error if the role isn't declared. User targets take a plain Discord snowflake `id: string` (user IDs cannot be statically typed).
-
-**All six Discord guild channel types** are supported via a discriminated union on `type`: `text`, `voice`, `announcement`, `stage`, `forum`, `media`. Each variant exposes only the fields relevant to that channel type.
+* Three API calls instead of one
+* Permission overwrites live in `createBlueprint` rather than alongside channel config, which differs from Discord's UI mental model
 
 ## Pros and Cons of the Options
 
-### Option A — Array-based structure with ServerContext (chosen)
+### Option A — Explicit `ServerContext` annotation
 
-* Good, because array order = Discord position, no extra bookkeeping
-* Good, because readable top-to-bottom like a real server sidebar
-* Bad, because duplicate names require a runtime dry-run check
+* Good, because one call for the blueprint
+* Bad, because users must write type annotations that restate values already in the blueprint
+* Bad, because channel names as string union values are widened to `string` — `client.channels` cannot return specific discord.js types
 
-### Option B — Object-keyed channels
+### Option B — Value-driven three-step API (chosen)
 
-* Good, because duplicate channel names are impossible at the type level
-* Bad, because object keys have no guaranteed order — positions would need a separate field
-* Bad, because nesting objects inside objects (channels inside categories) hurts readability
+* Good, because zero type annotations — purely value-driven
+* Good, because full autocomplete everywhere including permissions
+* Good, because `ic` and client infer everything from the blueprint value
+* Bad, because three calls instead of one
+* Bad, because permissions are defined separately from channel config
 
-### Option C — Flat list, categories inferred from position
+### Option C — Single `createBlueprint` call
 
-* Bad, because category membership becomes implicit — against the no-magic philosophy
-* Bad, because permission overwrite inheritance from category to channel becomes ambiguous
+* Good, because one call, minimal API surface
+* Bad, because TypeScript infers `roles` and `channels` simultaneously — role names in permission overwrites cannot be autocompleted or validated
+* Bad, because permission overwrites inside channel definitions reference roles TypeScript hasn't resolved yet
 
 ## Links
 
-* Informed by [ADR-0000](0000-record-architecture-decisions.md)
-* Implemented in `packages/core/src/blueprint/`
+* Full API specification: [docs/architecture/blueprint.md](../architecture/blueprint.md)
+* See [ADR-0007](0007-ic-context-and-client-wiring.md) — how `createIc(blueprint)` and the client extract `Ctx`
