@@ -4,17 +4,17 @@
 
 infracord is a general-purpose TypeScript framework for building Discord bots on top of discord.js. Its two core features are:
 
-1. **Server blueprint** — declare your Discord server's structure (categories, channels, roles, permissions) as TypeScript. infracord reconciles that against the live server, applying only the necessary changes. Think Terraform for Discord servers.
+1. **Server blueprint** — declare your Discord server's structure (roles, channels, permissions) as plain TypeScript values using `defineRoles`, `defineChannels`, and `createBlueprint`. infracord reconciles that against the live server, applying only the necessary changes. Think Terraform for Discord servers. No type annotations required — the framework infers everything from your values.
 
-2. **Feature system** — organize bot logic into self-contained features. Each feature co-locates its slash commands, event listeners, and interaction handlers (buttons, select menus, modals). The `ic` factory gives features type-safe access to blueprint resources.
+2. **Feature system** — organize bot logic into self-contained features. Each feature co-locates its slash commands, event listeners, and interaction handlers (buttons, select menus, modals). `createIc(blueprint)` gives features type-safe access to all declared resources — typed channel objects, typed role objects — inferred entirely from the blueprint.
 
 infracord wraps the discord.js `Client` and exposes it — users have full access to the underlying client and can use discord.js directly whenever they need to. The framework does not hide discord.js or lock users into infracord abstractions.
 
 ## The infracord client
 
 infracord provides its own client that wraps discord.js. It is responsible for:
-- Registering features and wiring up their commands, event listeners, and interaction handlers
-- Running any `onStartup` hooks defined in features
+- Receiving features at construction time and wiring up their commands, event listeners, and interaction handlers
+- Running `onStart` hooks defined in features after reconciliation completes
 - Deploying slash commands to Discord
 - Running the reconciler against the blueprint on startup or deploy
 
@@ -35,9 +35,6 @@ Designed to scale from solo developers to larger teams. The explicit registratio
 
 These are open questions that need ADRs before or during implementation:
 
-- Shape of the feature API (what `ic.feature()` accepts, how handlers are defined)
-- How the `ic` context object is constructed and what it exposes
-- How interaction ID maps are structured and typed
 - Build output format (CJS vs ESM vs dual)
 - Multi-guild wiring (how blueprints map to guilds, `guildCreate` handling)
 - Lock file system for channel identity tracking (v2)
@@ -49,10 +46,12 @@ These are open questions that need ADRs before or during implementation:
 - ADR-0003: Unmanaged resource policy (conservative default, strict opt-in)
 - ADR-0004: Channel identity and rename behaviour (name-as-identity v1, lock file v2)
 - ADR-0005: Rate limiting strategy (rely on discord.js, sequential apply, progress events)
+- ADR-0006: Feature API shape (ic.feature, ic.command, ic.interaction, ic.dynamicInteraction)
+- ADR-0007: ic context object and client wiring (createIc factory, InfracordClient, startup sequence)
 
 ## Current phase
 
-Design phase — working through ADRs before implementation. The blueprint type system is scaffolded and type-checks. The reconciler, feature system, and `ic` factory are documented but not yet implemented.
+Design phase — all core ADRs are complete. The blueprint type system is scaffolded (packages/core/src/blueprint/) and will need updating to match the new value-driven API (defineRoles, defineChannels, createBlueprint). The reconciler, feature system, and ic factory are fully designed and documented but not yet implemented.
 
 ## Project setup
 

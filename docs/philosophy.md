@@ -48,7 +48,9 @@ If you need to do something infracord does not have a specific abstraction for, 
 
 ## No dependency injection
 
-infracord does not use a DI container. Wiring is done through `ic` — a context-aware factory object that gives features type-safe access to the resources they declared. There is no container, no tokens, no registration step separate from your feature definition.
+infracord does not use a DI container. Wiring is done through `ic` — a typed factory created once with your `ServerContext` and exported from a shared file. Features import `ic` and use it to define their commands, events, and interactions. There is no container, no tokens, no registration step separate from your feature definition.
+
+`ic` itself has no runtime state. `createIc<MyServer>()` returns a plain object of factory functions whose only purpose is to make `MyServer` available to every handler without threading the generic by hand. It holds no connection to Discord, no reference to the client, and no internal registry. It cannot fail and has no lifecycle to manage.
 
 This keeps the framework readable. You can trace what a feature has access to by reading its definition. There is no indirection through a container to follow.
 
@@ -60,9 +62,17 @@ That said, nothing stops you from bringing your own patterns on top. If your pro
 
 Because the blueprint is TypeScript and lives alongside the bot, the type system can connect the two. The channel names, role names, and categories you declare in the blueprint flow into the feature system as types. The compiler knows what your server looks like, and it enforces that the bot only references things that exist.
 
-If you reference a channel that is not declared in the blueprint, your code does not compile. If you rename a role in the blueprint and forget to update a permission overwrite, the compiler tells you. If you add a new channel and a feature tries to access it before it is declared, it is a compile error — not a runtime crash.
+If you reference a channel that is not declared in the blueprint, your code does not compile. If you rename a role and forget to update a permission overwrite, the compiler tells you. If a feature tries to access a channel that does not exist, it is a compile error — not a runtime crash.
 
 This is the direct benefit of colocation. External tools like Terraform or YAML configs have no connection to your bot's type system. A channel can be removed from the config and the bot will compile and run fine — until it hits that code path at runtime and crashes. With infracord, the infrastructure and the logic that depends on it are part of the same compilation step. They are always in sync, or the code does not build.
+
+## Zero annotations — types are inferred, not declared
+
+Type safety should not require ceremony. infracord is designed so that users never write a type annotation, never pass a generic, and never use `as const` to coerce a value into its literal type.
+
+The blueprint is built from plain values — objects and strings. The framework infers everything it needs from those values using TypeScript's generic inference rules. Object keys are always inferred as string literals. Channel type fields (`"text"`, `"voice"`, etc.) are constrained to a union of literals, so TypeScript preserves the specific value. The `ServerContext` phantom type that carries all of this information internally is never visible to the user.
+
+The result: write your server structure as you would naturally describe it, get compile-time validation and autocomplete across the entire codebase with nothing extra required.
 
 ---
 
@@ -72,7 +82,15 @@ Discord interactions — buttons, select menus, modals — are identified by a `
 
 A subtler problem is orphaned interactions — a button that exists in the Discord client whose handler has been deleted, renamed, or moved. Users click it and nothing happens. There is no error, no log, no indication that anything went wrong. It just silently does not work.
 
-infracord routes interactions through explicit maps. Each interaction ID is a key in a typed map. The handler is the value. There is no string matching, no convention to remember. If a handler is removed, the interaction ID is also removed from the map — and any code that references it stops compiling. Orphaned interactions are not possible.
+infracord routes interactions through explicit maps built from feature registrations. Each interaction ID is a key in a map. The handler is the value. There is no string matching, no convention to remember. If a handler is removed, the interaction ID is also removed from the map — and any code that references the interaction object stops compiling. Orphaned interactions are not possible.
+
+## Component and handler together
+
+In most discord.js codebases, a button's appearance (label, style, custom ID) is defined where a message is built, and its handler is defined somewhere else entirely — often in a separate file, matched by a string pattern. These two things drift apart silently.
+
+infracord keeps them together. `ic.interaction()` and `ic.dynamicInteraction()` each produce a single object that carries both the component definition and its handler. The same object you pass to `ic.feature({ interactions: [...] })` for routing is the one you call `.build()` on when constructing a message. The framework owns the `customId` — it is set from the registered ID, never by hand.
+
+For interactions that carry per-message data — a ban button that encodes a target user ID, a confirmation that carries a record key — `ic.dynamicInteraction()` makes the data contract explicit and typed. The `encode` and `parse` functions define the ID structure; the handler receives the parsed data as a typed argument. No string splitting, no guessing.
 
 ---
 
