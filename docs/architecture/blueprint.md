@@ -6,17 +6,16 @@ For the decisions behind this design, see [ADR-0001](../adr/0001-blueprint-api-s
 
 ---
 
-## Three-step API
+## Two-step API
 
-The blueprint is built in three independent steps:
+The blueprint is built in two steps:
 
 ```
 defineRoles      — declare what roles exist and their base permissions
-defineChannels   — declare what channels exist and their config
-createBlueprint  — connect everything: structure, categories, and permissions
+createBlueprint  — declare channels inline in structure, with permissions co-located
 ```
 
-`defineRoles` and `defineChannels` know nothing about each other. `createBlueprint` is the only place both are available simultaneously — which is why it is also where permission overwrites (a relationship between channels and roles) are defined.
+Channels, their category placement, and their permission overwrites all live in `createBlueprint`. `defineRoles` is separate because roles must be resolved before `createBlueprint` can validate role names inside permission maps.
 
 ---
 
@@ -27,51 +26,111 @@ Declares the guild's roles. Object keys are always inferred as string literals b
 ```typescript
 const roles = defineRoles({
   moderator: { permissions: [PermissionFlagsBits.BanMembers], hoist: true, color: "#ff0000" },
-  member:    { permissions: [] },
+  member:    {},
 })
 ```
 
-Each role value is a `RoleDef`:
+Each role value is a `RoleDef`, built on discord.js's [`RoleData`](https://discord.js.org/docs/packages/discord.js/main/RoleData:Interface) so the reconciler can pass it directly to `GuildRoleManager.create()` / `Role.edit()` with no translation.
 
 | Field | Type | Description |
 |---|---|---|
 | `permissions` | `PermissionResolvable[]` | Base permissions for the role |
 | `color` | `ColorResolvable` | Role colour |
+| `colors` | `RoleColorsResolvable` | Role colour (new discord.js API, prefer over `color`) |
 | `hoist` | `boolean` | Show separately in member list |
 | `mentionable` | `boolean` | Allow @mention |
 | `position` | `number` | Role position (higher = more powerful) |
-| `unicodeEmoji` | `string` | Role icon emoji |
+| `unicodeEmoji` | `string \| null` | Role icon emoji (requires server boost level 2+) |
 
 ---
 
-## `defineChannels`
+## `createBlueprint`
 
-Declares the guild's channels as a record. Keys are channel names — always inferred as string literals. Values are `ChannelConfig` — a discriminated union on `type`.
+Receives `roles` and a `structure` array. Channels are declared inline inside `structure`, co-located with their category and permission overwrites.
 
 ```typescript
-const channels = defineChannels({
-  general:        { type: "text",         topic: "General chat" },
-  "mod-log":      { type: "text" },
-  announcements:  { type: "announcement" },
-  "voice-lounge": { type: "voice",        bitrate: 64000 },
-  "stage-main":   { type: "stage" },
-  feedback:       { type: "forum",        availableTags: [{ name: "bug" }, { name: "idea" }] },
-  media:          { type: "media" },
+const blueprint = createBlueprint({
+  roles,
+  structure: [
+    {
+      category: { name: "Community" },
+      channels: [
+        { name: "general",       type: "text",         topic: "General chat" },
+        { name: "voice-lounge",  type: "voice",        bitrate: 64000        },
+        {
+          name: "announcements",
+          type: "announcement",
+          topic: "Server announcements",
+          permissions: {
+            "@everyone": { deny:  [PermissionFlagsBits.SendMessages] },
+            moderator:   { allow: [PermissionFlagsBits.SendMessages] },
+          },
+        },
+      ],
+    },
+    {
+      category: {
+        name: "Staff",
+        permissions: {
+          "@everyone": { deny:  [PermissionFlagsBits.ViewChannel] },
+          moderator:   { allow: [PermissionFlagsBits.ViewChannel] },
+        },
+      },
+      channels: [
+        { name: "mod-log",    type: "text", topic: "Moderation log"    },
+        { name: "staff-chat", type: "text", topic: "Internal staff chat" },
+      ],
+    },
+    {
+      channels: [
+        { name: "lounge", type: "voice", bitrate: 64000 },
+      ],
+    },
+  ],
 })
 ```
 
-The `type` field is constrained to a union of string literals — TypeScript preserves the specific literal during inference without `as const`. Once `type` is set, the remaining fields narrow to that channel type only. Writing `topic` on a `voice` channel is a compile error.
+### `structure`
+
+An array of entries, each describing an optional category and an ordered list of channels. Array order maps directly to Discord channel positions — no separate `position` field needed.
+
+Each entry is:
+```typescript
+{
+  category?: { name: string; permissions?: PermissionMap<R> }
+  channels:  ChannelDef<R>[]
+}
+```
+
+Omitting `category` creates top-level channels outside any category. The `channels` array order determines position within the category.
+
+### Channel definitions
+
+Each channel definition is a `ChannelDef` — a `ChannelConfig` (discriminated by `type`) plus `name` and optional `permissions`:
+
+```typescript
+{
+  name:         string
+  type:         "text" | "voice" | "announcement" | "stage" | "forum" | "media"
+  permissions?: PermissionMap<R>
+  // ...type-specific fields
+}
+```
+
+The `type` field is the discriminant — TypeScript narrows the remaining fields to only those valid for that channel type. Writing `topic` on a `voice` channel is a compile error.
+
+All field names match discord.js's [`GuildChannelEditOptions`](https://discord.js.org/docs/packages/discord.js/main/GuildChannelEditOptions:Interface) directly — the reconciler spreads them into `channel.edit()` with no translation layer.
 
 ### Channel types and their fields
 
 **`text`**
 | Field | Type |
 |---|---|
-| `topic` | `string` |
+| `topic` | `string \| null` |
 | `nsfw` | `boolean` |
-| `slowmode` | `number` (seconds) |
+| `rateLimitPerUser` | `number` (seconds) |
 | `defaultAutoArchiveDuration` | `ThreadAutoArchiveDuration` |
-| `defaultThreadSlowmode` | `number` |
+| `defaultThreadRateLimitPerUser` | `number` |
 
 **`voice`**
 | Field | Type |
@@ -79,78 +138,72 @@ The `type` field is constrained to a union of string literals — TypeScript pre
 | `bitrate` | `number` |
 | `userLimit` | `number` |
 | `rtcRegion` | `string \| null` |
-| `videoQualityMode` | `VideoQualityMode` |
+| `videoQualityMode` | `VideoQualityMode \| null` |
 
 **`announcement`**
 | Field | Type |
 |---|---|
-| `topic` | `string` |
+| `topic` | `string \| null` |
 | `nsfw` | `boolean` |
 
 **`stage`**
 | Field | Type |
 |---|---|
-| `topic` | `string` |
+| `topic` | `string \| null` |
 | `bitrate` | `number` |
 | `rtcRegion` | `string \| null` |
 
-**`forum` and `media`**
+**`forum`**
 | Field | Type |
 |---|---|
-| `topic` | `string` |
+| `topic` | `string \| null` |
 | `nsfw` | `boolean` |
-| `availableTags` | `ForumTagDef[]` |
-| `defaultReactionEmoji` | `string` |
+| `rateLimitPerUser` | `number` |
 | `defaultAutoArchiveDuration` | `ThreadAutoArchiveDuration` |
-| `defaultThreadSlowmode` | `number` |
-| `defaultSortOrder` | `SortOrderType` (forum only) |
-| `defaultForumLayout` | `ForumLayoutType` (forum only) |
+| `defaultThreadRateLimitPerUser` | `number` |
+| `defaultSortOrder` | `SortOrderType \| null` |
+| `defaultForumLayout` | `ForumLayoutType` |
+| `availableTags` | `GuildForumTagData[]` |
+| `defaultReactionEmoji` | `DefaultReactionEmoji \| null` |
 
----
+**`media`**
+| Field | Type |
+|---|---|
+| `topic` | `string \| null` |
+| `nsfw` | `boolean` |
+| `availableTags` | `GuildForumTagData[]` |
+| `defaultReactionEmoji` | `DefaultReactionEmoji \| null` |
+| `defaultAutoArchiveDuration` | `ThreadAutoArchiveDuration` |
+| `defaultThreadRateLimitPerUser` | `number` |
 
-## `createBlueprint`
+### Forum tags and reaction emoji
 
-Receives `roles` and `channels` as fully-typed values and connects them with `structure` and `permissions`.
-
-```typescript
-const blueprint = createBlueprint({
-  roles,
-  channels,
-  structure: [
-    { category: "Community", channels: ["general", "announcements"] },
-    { category: "Staff",     channels: ["mod-log", "feedback"]      },
-    { channel:  "voice-lounge" },
-  ],
-  permissions: [
-    { channel:  "mod-log",   role: "@everyone", deny:  [PermissionFlagsBits.ViewChannel]  },
-    { channel:  "mod-log",   role: "moderator", allow: [PermissionFlagsBits.ViewChannel]  },
-    { category: "Staff",     role: "@everyone", deny:  [PermissionFlagsBits.ViewChannel]  },
-  ],
-})
-```
-
-### `structure`
-
-Defines channel ordering and category nesting. Array order maps directly to Discord channel positions — no separate `position` field needed.
-
-Each entry is one of:
-- `{ category: string, channels: string[] }` — a category with its ordered channel list
-- `{ channel: string }` — a top-level channel outside any category
-
-Both `category` names and `channel` names autocomplete from the declared values. A name not in `defineChannels` is a compile error.
-
-### `permissions`
-
-A flat list of permission overwrite relationships. Each entry is either channel-scoped or category-scoped:
+`availableTags` takes discord.js's [`GuildForumTagData`](https://discord.js.org/docs/packages/discord.js/main/GuildForumTagData:Interface) directly:
 
 ```typescript
-{ channel:  "mod-log",    role: "moderator", allow: [...], deny: [...] }
-{ category: "Staff",      role: "@everyone", deny: [...]               }
+availableTags: [
+  { name: "open",     emoji: { id: null, name: "🟢" } },
+  { name: "resolved", emoji: { id: null, name: "✅" }, moderated: true },
+  // Custom emoji: { id: "<snowflake>", name: null }
+]
 ```
 
-`channel` and `category` autocomplete from declared names. `role` autocompletes from declared role names plus `"@everyone"`. `allow` and `deny` take `PermissionResolvable[]` from discord.js.
+`defaultReactionEmoji` takes discord.js's `DefaultReactionEmoji` (`{ id: Snowflake | null, name: string | null }`), the same shape as the tag emoji.
 
-Both sides are fully validated because `roles` and `channels` are resolved before `permissions` is typed — this is why permissions live in `createBlueprint` rather than inside individual channel definitions.
+### Permission overwrites
+
+`PermissionMap<R>` is a partial record of role names (plus `"@everyone"`) to permission overwrite objects:
+
+```typescript
+permissions: {
+  "@everyone": { deny:  [PermissionFlagsBits.ViewChannel] },
+  moderator:   { allow: [PermissionFlagsBits.ViewChannel] },
+}
+```
+
+Each entry is either `{ allow, deny? }` or `{ deny, allow? }` — at least one side is required. Role names are validated against `defineRoles` at compile time via `PermissionMap<R>`. An undeclared role name is a type error.
+
+Permissions can be set on a category (inherited by all channels in it) or on individual channels.
 
 ---
 
@@ -161,9 +214,9 @@ Both sides are fully validated because `roles` and `channels` are resolved befor
 ```typescript
 // what TypeScript derives — the user never writes this
 type Ctx = ServerContext<
-  "moderator" | "member",                                            // role names
-  { general: "text"; "mod-log": "text"; "voice-lounge": "voice" },  // channel name → type map
-  "Community" | "Staff"                                             // category names
+  "moderator" | "member",                                                    // role names
+  { general: "text"; "voice-lounge": "voice"; announcements: "announcement" }, // channel name → type map
+  "Community" | "Staff"                                                      // category names
 >
 ```
 

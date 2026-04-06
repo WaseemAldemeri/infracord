@@ -28,7 +28,7 @@ interface InfracordClient<Ctx extends ServerContext> {
 
 `channels` and `roles` are populated from the live guild after the `ready` event, before any `onStart` hooks run. Accessing them before `start()` resolves is undefined behaviour.
 
-`client.channels["general"]` returns `TextChannel`. `client.channels["voice-lounge"]` returns `VoiceChannel`. The specific discord.js type is inferred from the `type` field declared in `defineChannels`. A channel name not in the blueprint is a compile error.
+`client.channels["general"]` returns `TextChannel`. `client.channels["voice-lounge"]` returns `VoiceChannel`. The specific discord.js type is inferred from the `type` field declared inline in `createBlueprint`. A channel name not in the blueprint is a compile error.
 
 ---
 
@@ -46,7 +46,7 @@ const client = new InfracordClient({
 await client.start()
 ```
 
-`blueprint` carries the full server type — `channels`, `roles`, `structure`, and `permissions`. `features` is the complete list of features the bot will run. Both must be provided before `start()`.
+`blueprint` carries the full server type — `roles` and `structure` (channels, categories, and permissions). `features` is the complete list of features the bot will run. Both must be provided before `start()`.
 
 ---
 

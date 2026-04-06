@@ -17,14 +17,14 @@ infracord wraps the discord.js `Client` and adds two layers on top: a server blu
 The blueprint is the single source of truth. Both `createIc` and `InfracordClient` receive it and infer the full server type from it — typed channel and role objects, compile-time validation — with no annotations required from the user.
 
 ```
-defineRoles + defineChannels
-            │
-            ▼
-     createBlueprint
-     ┌──────┴──────┐
-     ▼             ▼
-createIc        InfracordClient
-(features)      (runtime + reconciler)
+     defineRoles
+          │
+          ▼
+   createBlueprint
+   ┌──────┴──────┐
+   ▼             ▼
+createIc    InfracordClient
+(features)  (runtime + reconciler)
 ```
 
 ---
@@ -32,7 +32,7 @@ createIc        InfracordClient
 ## Startup sequence
 
 ```
-1. defineRoles / defineChannels / createBlueprint
+1. defineRoles / createBlueprint
 2. createIc(blueprint)               → src/ic.ts
 3. Define features with ic.feature()
 4. new InfracordClient({ token, blueprint, features })
@@ -47,7 +47,7 @@ createIc        InfracordClient
 
 ## Architecture documents
 
-- [Blueprint](./blueprint.md) — `defineRoles`, `defineChannels`, `createBlueprint`, how types are inferred
+- [Blueprint](./blueprint.md) — `defineRoles`, `createBlueprint`, how types are inferred
 - [Feature system](./feature-system.md) — `ic` factory, features, commands, events, interactions
 - [Client](./client.md) — `InfracordClient` interface, `start()` sequence, interaction routing
 - [Reconciler](./reconciler.md) — plan-then-apply pipeline, diffing, error handling
