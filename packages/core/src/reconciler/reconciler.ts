@@ -1,65 +1,56 @@
+import type { Guild } from "discord.js";
 import type { Blueprint } from "../blueprint/index.js";
 import type { ServerContext } from "../blueprint/types/context.js";
+import { type Applier, LoggingApplier } from "./applier.js";
+import { Differ } from "./differ.js";
 
+/**
+ * Orchestrates the full reconciliation pipeline for a single blueprint:
+ * diff the live guild state against the blueprint, then apply the resulting actions.
+ *
+ * Constructed and owned by `InfracordClient` — not part of the public infracord API.
+ * The blueprint is validated at construction time; an invalid blueprint throws immediately.
+ *
+ * @example
+ * ```ts
+ * const reconciler = new Reconciler(blueprint);
+ * await reconciler.reconcile(guild);
+ * ```
+ */
 export class Reconciler {
-  constructor(private blueprint: Blueprint<ServerContext>) {}
+	private differ: Differ;
 
-  public validate(): string[] {
-    const errors: string[] = [];
+	/**
+	 * @param blueprint - The server blueprint to reconcile against.
+	 * @param applier - The strategy used to apply actions. Defaults to {@link LoggingApplier},
+	 *   which logs each action without making any API calls. Pass a real `GuildApplier`
+	 *   (injected with the Discord client) for live reconciliation.
+	 * @throws If the blueprint fails validation.
+	 */
+	constructor(
+		blueprint: Blueprint<ServerContext>,
+		private applier: Applier = new LoggingApplier(),
+	) {
+		this.differ = new Differ(blueprint);
+		const errors = this.differ.validate();
+		if (errors.length > 0) {
+			throw new Error(`Blueprint validation failed:\n${errors.join("\n")}`);
+		}
+	}
 
-    // check for duplicate roles
-    const roleNames = new Set<string>();
-    Object.keys(this.blueprint.roles).forEach((roleName) => {
-      if (!roleName) {
-        errors.push(
-          "A role has an empty name — role names must be non-empty strings",
-        );
-        return;
-      }
-      if (roleNames.has(roleName)) {
-        errors.push(`Role "${roleName}" is defined more than once`);
-      }
-      roleNames.add(roleName);
-    });
+	/**
+	 * Diffs the live guild state against the blueprint and applies all resulting
+	 * actions via the configured {@link Applier}.
+	 *
+	 * @param guild - The Discord guild to reconcile. Fetched and passed in by `InfracordClient`.
+	 */
+	public async reconcile(guild: Guild): Promise<void> {
+		const { actions, messages } = await this.differ.diff(guild);
 
-    // check for duplicate categories
-    const categoryNames = new Set<string>();
+		for (const message of messages) {
+			console.log(`[reconciler] ${message}`);
+		}
 
-    // check for duplicate top-level channels
-    const topLevelChannelNames = new Set<string>();
-
-    this.blueprint.structure.forEach((entry, i) => {
-      const catName = entry.category?.name;
-      if (catName !== undefined && !catName) {
-        errors.push(
-          `Structure entry ${i} has a category with an empty name — category names must be non-empty strings`,
-        );
-      } else if (catName) {
-        if (categoryNames.has(catName)) {
-          errors.push(`Category "${catName}" is defined more than once`);
-        }
-        categoryNames.add(catName);
-      }
-
-      // check for duplicate channels in the same category
-      const scope = catName ? `category "${catName}"` : "top-level";
-      const channelNames = catName ? new Set<string>() : topLevelChannelNames;
-      entry.channels.forEach((ch) => {
-        if (!ch.name) {
-          errors.push(
-            `A channel in ${scope} has an empty name — channel names must be non-empty strings`,
-          );
-          return;
-        }
-        if (channelNames.has(ch.name)) {
-          errors.push(
-            `Channel "${ch.name}" in ${scope} is defined more than once`,
-          );
-        }
-        channelNames.add(ch.name);
-      });
-    });
-
-    return errors;
-  }
+		await this.applier.applyAll(actions);
+	}
 }
