@@ -38,29 +38,69 @@ Chosen option: **Option A — plan-then-apply**, because it is the only model th
 
 ```
 1. Validate   — check blueprint integrity (duplicate names, etc.)
+                happens at Reconciler construction time — a bad blueprint throws immediately
                 abort on any error — nothing has been touched
 2. Fetch      — read live guild state from Discord (roles, channels, categories, overwrites)
                 abort on API failure
 3. Diff       — compare desired state vs live state → produce Action[]
-4. Dry run    — print Action[] with human-readable descriptions, exit
-   Apply      — execute each action against the Discord API
+                performed by Differ, a pure class that receives a pre-built GuildState snapshot
+4. Dry run    — print Action[] with human-readable descriptions, exit (via LoggingApplier)
+   Apply      — execute each action against the Discord API (via a real GuildApplier)
 ```
+
+**Reconciler class decomposition:**
+
+The pipeline is split across two classes:
+- `Differ` — pure, stateless. Holds the blueprint. Validates it and diffs a given `GuildState` against it. Can be reused across guilds.
+- `Reconciler` — orchestrates. Constructs `Differ`, validates at construction, fetches `GuildState` from the live guild, calls `Differ.diff()`, and delegates apply to an `Applier`.
+
+**Applier strategy:**
+
+Apply behaviour is injectable via the `Applier` abstract class. `Reconciler` defaults to `LoggingApplier` (logs actions, makes no API calls — effectively a dry run). A real `GuildApplier` that calls the Discord API is passed in for live reconciliation.
 
 **Action type shape:**
 
+Actions use a generic three-variant union discriminated by both `type` and `resource`, rather than one variant per resource×operation combination:
+
+```typescript
+type ResourceType = "ROLE" | "CHANNEL" | "CATEGORY";
+
+type ActionConfig = RoleDef | ChannelConfig | CategoryDef<ServerContext>;
+
+type CreateAction = {
+  type: "CREATE";
+  resource: ResourceType;
+  name: string;
+  config: ActionConfig;
+};
+
+type UpdateAction = {
+  type: "UPDATE";
+  resource: ResourceType;
+  name: string;
+  referenceId: string; // Discord snowflake ID of the existing resource
+  config: ActionConfig;
+};
+
+type DeleteAction = {
+  type: "DELETE";
+  resource: ResourceType;
+  name: string;
+  referenceId: string;
+};
+
+type Action = CreateAction | UpdateAction | DeleteAction;
+```
+
+Permission overwrite diffing extends this union with two additional variants:
+
 ```typescript
 type Action =
-  | { type: 'create-role';               name: string;  def: RoleDef }
-  | { type: 'update-role';               id: string;    name: string; changes: Partial<RoleDef> }
-  | { type: 'delete-role';               id: string;    name: string }
-  | { type: 'create-category';           name: string;  def: CategoryDef<ServerContext> }
-  | { type: 'update-category';           id: string;    name: string; changes: Partial<CategoryDef<ServerContext>> }
-  | { type: 'delete-category';           id: string;    name: string }
-  | { type: 'create-channel';            name: string;  def: ChannelDef<ServerContext> }
-  | { type: 'update-channel';            id: string;    name: string; changes: Partial<ChannelDef<ServerContext>> }
-  | { type: 'delete-channel';            id: string;    name: string }
-  | { type: 'sync-permission-overwrite'; targetId: string; targetName: string; overwrite: PermissionOverwrite<ServerContext> }
-  | { type: 'delete-permission-overwrite'; targetId: string; targetName: string; subject: string }
+  | CreateAction
+  | UpdateAction
+  | DeleteAction
+  | { type: "sync-permission-overwrite";   targetId: string; targetName: string; overwrite: PermissionOverwrite<ServerContext> }
+  | { type: "delete-permission-overwrite"; targetId: string; targetName: string; subject: string }
 ```
 
 ## Error Handling

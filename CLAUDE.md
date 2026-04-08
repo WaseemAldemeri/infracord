@@ -51,7 +51,9 @@ These are open questions that need ADRs before or during implementation:
 
 ## Current phase
 
-Design phase — all core ADRs are complete. The blueprint type system is scaffolded (packages/core/src/blueprint/) and will need updating to match the new value-driven API (defineRoles, defineChannels, createBlueprint). The reconciler, feature system, and ic factory are fully designed and documented but not yet implemented.
+Implementation phase — all core ADRs are complete. The reconciler pipeline is implemented (`Differ`, `Reconciler`, `Applier`/`LoggingApplier`, `Action` types). Role diffing is complete; channel and category diffing are stubbed.
+
+The blueprint type system is scaffolded (`packages/core/src/blueprint/`) and will need updating to match the value-driven API (`defineRoles`, `defineChannels`, `createBlueprint`). The feature system and `ic` factory are designed and documented but not yet implemented.
 
 ## Project setup
 

@@ -16,17 +16,14 @@ The reconciler works in four sequential stages. The first three stages are read-
 
 ```mermaid
 flowchart TD
-    A([Start]) --> B[1. Validate]
+    A([Start]) --> B[1. Validate blueprint]
     B -->|error| ABORT1([Abort — nothing touched])
     B -->|ok| C[2. Fetch guild state]
     C -->|API error| ABORT2([Abort — nothing touched])
-    C -->|ok| D[3. Diff]
+    C -->|ok| D[3. Diff → Action list]
     D --> E{Action list empty?}
     E -->|yes| DONE([No changes needed])
-    E -->|no| F{Mode?}
-    F -->|dry run| G[Print Action list]
-    G --> DONE2([Exit])
-    F -->|apply| H[4. Apply actions sequentially]
+    E -->|no| H[4. Applier.applyAll]
     H --> I{All succeeded?}
     I -->|yes| DONE3([Complete])
     I -->|partial failure| J[Report all errors]
@@ -37,7 +34,7 @@ flowchart TD
 
 ## Stage 1 — Validate
 
-Before touching the network, the reconciler checks that the blueprint itself is internally consistent.
+Before touching the network, the reconciler checks that the blueprint itself is internally consistent. Validation happens at `Reconciler` construction time — an invalid blueprint throws immediately rather than failing later when reconciliation is triggered.
 
 Checks performed:
 - No duplicate channel names across the entire structure
@@ -75,49 +72,83 @@ flowchart LR
 ```
 
 For each declared resource, the diff checks:
-- Does it exist on the live server? → `create-*` action if not
-- Does it match the blueprint exactly? → `update-*` action if not
+- Does it exist on the live server? → `CREATE` action if not
+- Does it match the blueprint exactly? → `UPDATE` action if not
 - Are its permission overwrites exact? → `sync-permission-overwrite` actions for each discrepancy
 
 For each live resource not in the blueprint:
 - **Conservative mode (default):** emit a warning, no action added
-- **Strict mode:** add a `delete-*` action
+- **Strict mode:** add a `DELETE` action
 
 The action list is a typed discriminated union. Each action carries everything needed to describe itself in a dry run and execute itself in apply mode.
 
+Actions use a generic three-variant union discriminated by both `type` and `resource`, rather than one variant per resource×operation:
+
+```typescript
+type ResourceType = "ROLE" | "CHANNEL" | "CATEGORY";
+
+type ActionConfig = RoleDef | ChannelConfig | CategoryDef<ServerContext>;
+
+type CreateAction = {
+  type: "CREATE";
+  resource: ResourceType;
+  name: string;
+  config: ActionConfig;
+};
+
+type UpdateAction = {
+  type: "UPDATE";
+  resource: ResourceType;
+  name: string;
+  referenceId: string; // Discord snowflake ID of the existing resource
+  config: ActionConfig;
+};
+
+type DeleteAction = {
+  type: "DELETE";
+  resource: ResourceType;
+  name: string;
+  referenceId: string;
+};
+
+type Action = CreateAction | UpdateAction | DeleteAction;
+```
+
+Permission overwrite diffing extends this union with `sync-permission-overwrite` and `delete-permission-overwrite` variants:
+
 ```typescript
 type Action =
-  | { type: 'create-role';                name: string;     def: RoleDef }
-  | { type: 'update-role';                id: string;       name: string; changes: Partial<RoleDef> }
-  | { type: 'delete-role';                id: string;       name: string }
-  | { type: 'create-category';            name: string;     def: CategoryDef<ServerContext> }
-  | { type: 'update-category';            id: string;       name: string; changes: Partial<CategoryDef<ServerContext>> }
-  | { type: 'delete-category';            id: string;       name: string }
-  | { type: 'create-channel';             name: string;     def: ChannelDef<ServerContext> }
-  | { type: 'update-channel';             id: string;       name: string; changes: Partial<ChannelDef<ServerContext>> }
-  | { type: 'delete-channel';             id: string;       name: string }
-  | { type: 'sync-permission-overwrite';  targetId: string; targetName: string; overwrite: PermissionOverwrite<ServerContext> }
-  | { type: 'delete-permission-overwrite'; targetId: string; targetName: string; subject: string }
+  | CreateAction
+  | UpdateAction
+  | DeleteAction
+  | { type: "sync-permission-overwrite";   targetId: string; targetName: string; overwrite: PermissionOverwrite<ServerContext> }
+  | { type: "delete-permission-overwrite"; targetId: string; targetName: string; subject: string }
 ```
 
 ---
 
-## Stage 4 — Dry run or Apply
+## Stage 4 — Apply
 
-### Dry run
+Apply behaviour is injectable via the `Applier` abstract class. `Reconciler` accepts an `Applier` at construction time and defaults to `LoggingApplier`, which logs each action without making any API calls — effectively a dry run. A real `GuildApplier` that calls the Discord API is passed in for live reconciliation.
 
-The action list is printed in a human-readable format and the process exits. Nothing is sent to Discord.
-
-```
-  CREATE role "moderator"
-  UPDATE channel "general" — topic changed
-  SYNC   permission overwrite on "staff-chat" for role "admin"
-  WARN   channel "#memes" is unmanaged (not in blueprint)
+```typescript
+abstract class Applier {
+  abstract apply(action: Action): Promise<void>;
+  async applyAll(actions: Action[]): Promise<void> { ... }
+}
 ```
 
-Dry run is the recommended first step any time the blueprint changes.
+### Logging (dry run)
 
-### Apply
+When `LoggingApplier` is in use, actions are printed in a human-readable format. Nothing is sent to Discord.
+
+```
+  [reconciler] CREATE ROLE "moderator"
+  [reconciler] UPDATE CHANNEL "general"
+  [reconciler] DELETE ROLE "old-role"
+```
+
+### Live apply
 
 Actions are executed against the Discord API **sequentially**, one at a time. Sequential execution is intentional:
 
@@ -135,34 +166,42 @@ This is the correct behaviour because:
 ```mermaid
 flowchart TD
     AL[Action list] --> LOOP[For each action]
-    LOOP --> EXEC[Execute against Discord API]
-    EXEC -->|success| EVT1[Emit action:applied]
-    EXEC -->|failure| EVT2[Emit action:failed]
-    EVT1 --> NEXT{More actions?}
-    EVT2 --> COLLECT[Collect error]
+    LOOP --> EXEC[Applier.apply action]
+    EXEC -->|success| NEXT{More actions?}
+    EXEC -->|failure| COLLECT[Collect error]
     COLLECT --> NEXT
     NEXT -->|yes| LOOP
-    NEXT -->|no| REPORT[Emit complete with results]
+    NEXT -->|no| REPORT[Report results]
 ```
 
 ---
 
 ## Progress events
 
-The reconciler emits typed events during apply so callers can display live progress:
+Progress reporting is handled inside the `Applier` implementation. A `GuildApplier` can emit log lines, call callbacks, or write to a progress stream as part of its `apply` and `applyAll` implementations:
 
 ```typescript
-reconciler.on('action:applied', (action) => {
-  console.log(`  ✓ ${describeAction(action)}`);
-});
+class GuildApplier extends Applier {
+  async apply(action: Action): Promise<void> {
+    // ... call Discord API ...
+    console.log(`  ✓ ${action.type} ${action.resource} "${action.name}"`);
+  }
 
-reconciler.on('action:failed', (action, error) => {
-  console.error(`  ✗ ${describeAction(action)}: ${error.message}`);
-});
-
-reconciler.on('complete', (result) => {
-  console.log(`Done. ${result.applied} applied, ${result.errors.length} failed.`);
-});
+  async applyAll(actions: Action[]): Promise<void> {
+    const errors: Array<{ action: Action; error: unknown }> = [];
+    for (const action of actions) {
+      try {
+        await this.apply(action);
+      } catch (err) {
+        console.error(`  ✗ ${action.type} ${action.resource} "${action.name}"`);
+        errors.push({ action, error: err });
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, `${errors.length} action(s) failed`);
+    }
+  }
+}
 ```
 
 ---
@@ -174,7 +213,7 @@ Resources that exist on the live server but are not declared in the blueprint ar
 | Mode | Behaviour |
 |---|---|
 | Conservative (default) | Warn in output, leave untouched |
-| Strict (`--strict` or `strict: true`) | Add a `delete-*` action to the plan |
+| Strict (`--strict` or `strict: true`) | Add a `DELETE` action to the plan |
 
 Declared resources are **always enforced exactly**, regardless of mode. If a channel exists in the blueprint but has drifted (wrong topic, wrong permissions), the reconciler corrects it. The conservative/strict distinction only applies to resources not mentioned in the blueprint at all.
 
