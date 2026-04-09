@@ -63,8 +63,19 @@ The blueprint type system is scaffolded (`packages/core/src/blueprint/`) and wil
 - Language: TypeScript (strict, NodeNext modules)
 - Bundler: tsdown
 - Linter/formatter: Biome
+- Test runner: Vitest (`npm run test` in `packages/core`)
 - ADRs: MADR format, stored in `docs/adr/`
 - Future: Docusaurus docs, hosted on .js.org, published to npm
+
+## Testing
+
+- Test files live in `packages/core/tests/`, mirroring the `src/` structure (e.g., `tests/reconciler/differ.roles.test.ts` for `src/reconciler/differ.ts`).
+- One concern per file — split by logical area (e.g., `differ.validate.test.ts` and `differ.roles.test.ts` rather than one combined file).
+- Classes with I/O (like `Reconciler`) are tested by injecting pre-built state — keep tests pure and side-effect-free.
+- Mock only what the code actually reads. Use `as unknown as T` casts for discord.js types; construct minimal objects with only the fields the unit under test accesses.
+- Test behaviour, not implementation. Assert on actions produced, messages emitted, and errors returned — not on internal state or call counts.
+- Each test should have a single, clear failure reason. Avoid testing multiple independent behaviours in one `it` block; the multi-step integration-style tests (e.g., "mix of create, update, skip") are the exception, not the rule.
+- Correctness matters more than coverage numbers. A small set of precise, well-named tests is better than broad coverage with vague assertions.
 
 ## Scope notes
 

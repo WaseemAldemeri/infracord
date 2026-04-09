@@ -111,6 +111,21 @@ Two distinct phases, two distinct behaviours:
 
 **Apply phase** — collect errors, continue applying remaining actions, report all failures at the end. Rationale: actions are largely independent (creating a role does not depend on updating a channel topic). Applying as much as possible means the server is closer to desired state even after a partial failure. On the next reconcile run, the diff will naturally include whatever failed — no special retry logic required.
 
+### Validation error shape
+
+`Differ.validate()` returns `ValidationError[]` — structured objects with a typed `code` and a human-readable `message` — rather than plain strings:
+
+```typescript
+type ValidationError = {
+  code: ValidationErrorCode; // e.g. "DUPLICATE_CATEGORY_NAME", "EMPTY_CHANNEL_NAME"
+  message: string;
+};
+```
+
+Rationale: string arrays are only useful for display. Typed codes let callers handle specific errors programmatically and let tests assert on stable identifiers rather than message wording.
+
+When validation fails, `Reconciler` throws a `BlueprintValidationError extends Error` that holds the full `ValidationError[]` on its `.errors` property. This makes the thrown value both `instanceof`-catchable and structurally inspectable, while keeping the `Error.message` human-readable for logs and stack traces.
+
 ## Links
 
 * Informed by [ADR-0001](0001-blueprint-api-shape.md)
