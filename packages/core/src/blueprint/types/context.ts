@@ -18,5 +18,6 @@ export type ServerContext<
 
 export type Roles<Ctx extends ServerContext> = Ctx["_roles"];
 export type ChannelTypeMap<Ctx extends ServerContext> = Ctx["_channels"];
-export type ChannelNames<Ctx extends ServerContext> = keyof Ctx["_channels"] & string;
+export type ChannelNames<Ctx extends ServerContext> = keyof Ctx["_channels"] &
+	string;
 export type Categories<Ctx extends ServerContext> = Ctx["_categories"];

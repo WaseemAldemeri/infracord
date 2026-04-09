@@ -1,6 +1,9 @@
 import type { Blueprint } from "./types/blueprint.js";
 import type { ChannelType, ServerContext } from "./types/context.js";
-import type { ExtractCategories, ExtractChannelTypeMap } from "./types/inference.js";
+import type {
+	ExtractCategories,
+	ExtractChannelTypeMap,
+} from "./types/inference.js";
 import type { ServerRoles } from "./types/roles.js";
 import type { StructureEntry } from "./types/structure.js";
 

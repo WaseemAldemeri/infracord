@@ -1,7 +1,9 @@
 import type { ChannelType } from "./context.js";
 
 type UnionToIntersection<U> = (
-	U extends unknown ? (k: U) => void : never
+	U extends unknown
+		? (k: U) => void
+		: never
 ) extends (k: infer I) => void
 	? I
 	: never;
