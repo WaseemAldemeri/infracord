@@ -59,7 +59,7 @@ export class Reconciler {
 
 		console.log(`[reconciler] [applier] Applying ${actions.length} actions`);
 
-		await this.applier.applyAll(actions);
+		await this.applier.applyAll(actions, guild);
 	}
 
 	/**
