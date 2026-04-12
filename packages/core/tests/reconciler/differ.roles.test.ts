@@ -239,3 +239,71 @@ describe("Differ.diff — roles", () => {
 		expect(actions).toHaveLength(0);
 	});
 });
+
+describe("Differ.diff — roles — strict mode", () => {
+	it("emits a DELETE action for an unmanaged role in strict mode", () => {
+		const bp = createBlueprint({ structure: [] });
+
+		const guildState = makeGuildState([makeRole({ name: "unmanaged" })]);
+		const { actions, events } = new Differ(bp, { strict: true }).diff(
+			guildState,
+		);
+
+		expect(actions).toContainEqual({
+			type: "DELETE",
+			resource: ResourceType.ROLE,
+			name: "unmanaged",
+			referenceId: "snowflake-unmanaged",
+		});
+		// No UNMANAGED event — action replaces it
+		expect(events.some((e) => e.kind === DiffEventKind.UNMANAGED)).toBe(false);
+	});
+
+	it("emits DELETE actions for all roles on an empty blueprint in strict mode", () => {
+		const bp = createBlueprint({ structure: [] });
+
+		const guildState = makeGuildState([
+			makeRole({ name: "alpha" }),
+			makeRole({ name: "beta" }),
+		]);
+		const { actions } = new Differ(bp, { strict: true }).diff(guildState);
+
+		const names = actions.map((a) => a.name);
+		expect(names).toContain("alpha");
+		expect(names).toContain("beta");
+		expect(actions.every((a) => a.type === "DELETE")).toBe(true);
+	});
+});
+
+describe("Differ.diff — roles — deleteDuplicates mode", () => {
+	it("emits a DELETE action for the duplicate occurrence and a DUPLICATE event", () => {
+		const bp = createBlueprint({
+			roles: { mod: { color: 0xff0000 } },
+			structure: [],
+		});
+
+		const first = makeRole({ id: "id-first", name: "mod", color: 0xff0000 });
+		const second = makeRole({ id: "id-second", name: "mod", color: 0x00ff00 });
+
+		const guildState = makeGuildState([first, second]);
+		const { actions, events } = new Differ(bp, {
+			deleteDuplicates: true,
+		}).diff(guildState);
+
+		// Event still emitted — explains why the delete is happening
+		expect(events).toContainEqual({
+			kind: DiffEventKind.DUPLICATE,
+			resource: ResourceType.ROLE,
+			name: "mod",
+		});
+		// DELETE targets the second (duplicate) occurrence
+		expect(actions).toContainEqual({
+			type: "DELETE",
+			resource: ResourceType.ROLE,
+			name: "mod",
+			referenceId: "id-second",
+		});
+		// First occurrence matches blueprint → no UPDATE
+		expect(actions.some((a) => a.type === "UPDATE")).toBe(false);
+	});
+});

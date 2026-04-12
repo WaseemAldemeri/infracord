@@ -12,6 +12,21 @@ export type DiffResult = {
 	events: DiffEvent[];
 };
 
+export type DifferOptions = {
+	/**
+	 * When true, unmanaged resources (present in the guild but not declared in the
+	 * blueprint) emit DELETE actions instead of UNMANAGED events.
+	 * Defaults to false — unmanaged resources are left untouched.
+	 */
+	strict?: boolean;
+	/**
+	 * When true, duplicate guild resources (multiple resources sharing the same name)
+	 * emit DELETE actions for all occurrences after the first.
+	 * Defaults to false — duplicates are warned about but left untouched.
+	 */
+	deleteDuplicates?: boolean;
+};
+
 /**
  * Computes the difference between a blueprint and a {@link GuildState} snapshot,
  * producing a set of {@link Action}s that describe what needs to change.
@@ -21,7 +36,10 @@ export type DiffResult = {
  * (see {@link Reconciler}). The same instance can be reused across multiple guilds.
  */
 export class Differ {
-	constructor(private blueprint: Blueprint<ServerContext>) {}
+	constructor(
+		private blueprint: Blueprint<ServerContext>,
+		private options: DifferOptions = {},
+	) {}
 
 	/**
 	 * Validates the blueprint for structural errors.
@@ -165,6 +183,9 @@ export class Differ {
 					resource: ResourceType.ROLE,
 					name: role.name,
 				});
+				if (this.options.deleteDuplicates) {
+					actions.push(Actions.deleteRoleAction(role.name, role.id));
+				}
 				continue;
 			}
 			guildRoles.set(role.name, role);
@@ -193,11 +214,15 @@ export class Differ {
 
 		for (const [, role] of guildState.roles) {
 			if (!(role.name in this.blueprint.roles)) {
-				events.push({
-					kind: DiffEventKind.UNMANAGED,
-					resource: ResourceType.ROLE,
-					name: role.name,
-				});
+				if (this.options.strict) {
+					actions.push(Actions.deleteRoleAction(role.name, role.id));
+				} else {
+					events.push({
+						kind: DiffEventKind.UNMANAGED,
+						resource: ResourceType.ROLE,
+						name: role.name,
+					});
+				}
 			}
 		}
 
