@@ -9,30 +9,89 @@ export const ResourceType = {
 
 export type ResourceType = (typeof ResourceType)[keyof typeof ResourceType];
 
-type ActionConfig = RoleDef | ChannelConfig | CategoryDef<never>;
+// --- Role actions ---
 
-type BaseAction = {
-	resource: ResourceType;
-	name: string;
-};
-
-export type CreateAction = BaseAction & {
+export type CreateRoleAction = {
 	type: "CREATE";
-	config: ActionConfig;
+	resource: typeof ResourceType.ROLE;
+	name: string;
+	config: RoleDef;
 };
 
-export type UpdateAction = BaseAction & {
+export type UpdateRoleAction = {
 	type: "UPDATE";
+	resource: typeof ResourceType.ROLE;
+	name: string;
 	referenceId: string;
-	config: ActionConfig;
+	config: RoleDef;
 };
 
-export type DeleteAction = BaseAction & {
+export type DeleteRoleAction = {
 	type: "DELETE";
+	resource: typeof ResourceType.ROLE;
+	name: string;
 	referenceId: string;
 };
 
-export type Action = CreateAction | UpdateAction | DeleteAction;
+// --- Channel actions ---
+
+export type CreateChannelAction = {
+	type: "CREATE";
+	resource: typeof ResourceType.CHANNEL;
+	name: string;
+	config: ChannelConfig;
+};
+
+export type UpdateChannelAction = {
+	type: "UPDATE";
+	resource: typeof ResourceType.CHANNEL;
+	name: string;
+	referenceId: string;
+	config: ChannelConfig;
+};
+
+export type DeleteChannelAction = {
+	type: "DELETE";
+	resource: typeof ResourceType.CHANNEL;
+	name: string;
+	referenceId: string;
+};
+
+// --- Category actions ---
+
+export type CreateCategoryAction = {
+	type: "CREATE";
+	resource: typeof ResourceType.CATEGORY;
+	name: string;
+	config: CategoryDef<never>;
+};
+
+export type UpdateCategoryAction = {
+	type: "UPDATE";
+	resource: typeof ResourceType.CATEGORY;
+	name: string;
+	referenceId: string;
+	config: CategoryDef<never>;
+};
+
+export type DeleteCategoryAction = {
+	type: "DELETE";
+	resource: typeof ResourceType.CATEGORY;
+	name: string;
+	referenceId: string;
+};
+
+export type RoleAction = CreateRoleAction | UpdateRoleAction | DeleteRoleAction;
+export type ChannelAction =
+	| CreateChannelAction
+	| UpdateChannelAction
+	| DeleteChannelAction;
+export type CategoryAction =
+	| CreateCategoryAction
+	| UpdateCategoryAction
+	| DeleteCategoryAction;
+
+export type Action = RoleAction | ChannelAction | CategoryAction;
 
 /** Factory functions for constructing {@link Action} values, grouped by resource type. */
 export namespace Actions {
@@ -41,7 +100,7 @@ export namespace Actions {
 	export function createRoleAction(
 		name: string,
 		config: RoleDef,
-	): CreateAction {
+	): CreateRoleAction {
 		return { type: "CREATE", resource: ResourceType.ROLE, name, config };
 	}
 
@@ -49,7 +108,7 @@ export namespace Actions {
 		name: string,
 		referenceId: string,
 		config: RoleDef,
-	): UpdateAction {
+	): UpdateRoleAction {
 		return {
 			type: "UPDATE",
 			resource: ResourceType.ROLE,
@@ -62,7 +121,7 @@ export namespace Actions {
 	export function deleteRoleAction(
 		name: string,
 		referenceId: string,
-	): DeleteAction {
+	): DeleteRoleAction {
 		return { type: "DELETE", resource: ResourceType.ROLE, name, referenceId };
 	}
 
@@ -71,7 +130,7 @@ export namespace Actions {
 	export function createChannelAction(
 		name: string,
 		config: ChannelConfig,
-	): CreateAction {
+	): CreateChannelAction {
 		return { type: "CREATE", resource: ResourceType.CHANNEL, name, config };
 	}
 
@@ -79,7 +138,7 @@ export namespace Actions {
 		name: string,
 		referenceId: string,
 		config: ChannelConfig,
-	): UpdateAction {
+	): UpdateChannelAction {
 		return {
 			type: "UPDATE",
 			resource: ResourceType.CHANNEL,
@@ -92,7 +151,7 @@ export namespace Actions {
 	export function deleteChannelAction(
 		name: string,
 		referenceId: string,
-	): DeleteAction {
+	): DeleteChannelAction {
 		return {
 			type: "DELETE",
 			resource: ResourceType.CHANNEL,
@@ -106,7 +165,7 @@ export namespace Actions {
 	export function createCategoryAction(
 		name: string,
 		config: CategoryDef<never>,
-	): CreateAction {
+	): CreateCategoryAction {
 		return { type: "CREATE", resource: ResourceType.CATEGORY, name, config };
 	}
 
@@ -114,7 +173,7 @@ export namespace Actions {
 		name: string,
 		referenceId: string,
 		config: CategoryDef<never>,
-	): UpdateAction {
+	): UpdateCategoryAction {
 		return {
 			type: "UPDATE",
 			resource: ResourceType.CATEGORY,
@@ -127,7 +186,7 @@ export namespace Actions {
 	export function deleteCategoryAction(
 		name: string,
 		referenceId: string,
-	): DeleteAction {
+	): DeleteCategoryAction {
 		return {
 			type: "DELETE",
 			resource: ResourceType.CATEGORY,
