@@ -55,6 +55,14 @@ Implementation phase — all core ADRs are complete. The reconciler pipeline is 
 
 The blueprint type system is scaffolded (`packages/core/src/blueprint/`) and will need updating to match the value-driven API (`defineRoles`, `defineChannels`, `createBlueprint`). The feature system and `ic` factory are designed and documented but not yet implemented.
 
+## Workflow
+
+After every file edit, run:
+
+```
+npx biome check --write
+```
+
 ## Project setup
 
 - Monorepo: npm workspaces

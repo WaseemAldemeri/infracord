@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createBlueprint } from "../../src/blueprint/createBlueprint.js";
 import { Differ } from "../../src/reconciler/differ.js";
 import { ResourceType } from "../../src/reconciler/types/action.js";
+import { DiffEventKind } from "../../src/reconciler/types/diffEvent.js";
 import { makeGuildState, makeRole } from "../helpers/discord.js";
 
 describe("Differ.diff — roles", () => {
@@ -11,7 +12,7 @@ describe("Differ.diff — roles", () => {
 			structure: [],
 		});
 
-		const { actions, messages } = new Differ(bp).diff(makeGuildState([]));
+		const { actions } = new Differ(bp).diff(makeGuildState([]));
 
 		expect(actions).toHaveLength(1);
 		expect(actions[0]).toMatchObject({
@@ -19,7 +20,6 @@ describe("Differ.diff — roles", () => {
 			resource: ResourceType.ROLE,
 			name: "mod",
 		});
-		expect(messages.some((m) => m.includes("will create"))).toBe(true);
 	});
 
 	it("emits no action and a skip message when a role matches the blueprint", () => {
@@ -29,12 +29,14 @@ describe("Differ.diff — roles", () => {
 		});
 
 		const guildState = makeGuildState([makeRole({ name: "mod" })]);
-		const { actions, messages } = new Differ(bp).diff(guildState);
+		const { actions, events } = new Differ(bp).diff(guildState);
 
 		expect(actions).toHaveLength(0);
-		expect(messages.some((m) => m.includes("matches the blueprint"))).toBe(
-			true,
-		);
+		expect(events).toContainEqual({
+			kind: DiffEventKind.SKIP,
+			resource: ResourceType.ROLE,
+			name: "mod",
+		});
 	});
 
 	it("does not emit an action for a role with no managed fields defined", () => {
@@ -55,10 +57,14 @@ describe("Differ.diff — roles", () => {
 		const bp = createBlueprint({ structure: [] });
 
 		const guildState = makeGuildState([makeRole({ name: "some-role" })]);
-		const { actions, messages } = new Differ(bp).diff(guildState);
+		const { actions, events } = new Differ(bp).diff(guildState);
 
 		expect(actions).toHaveLength(0);
-		expect(messages.some((m) => m.includes("unmanaged"))).toBe(true);
+		expect(events).toContainEqual({
+			kind: DiffEventKind.UNMANAGED,
+			resource: ResourceType.ROLE,
+			name: "some-role",
+		});
 	});
 
 	it("emits an UPDATE action when color differs", () => {
@@ -199,15 +205,17 @@ describe("Differ.diff — roles", () => {
 			makeRole({ name: "extra" }), // not in blueprint → unmanaged
 		]);
 
-		const { actions, messages } = new Differ(bp).diff(guildState);
+		const { actions, events } = new Differ(bp).diff(guildState);
 
 		const types = actions.map((a) => `${a.type}:${a.name}`);
 		expect(types).toContain("UPDATE:admin");
 		expect(types).toContain("CREATE:member");
 		expect(types).not.toContain("UPDATE:mod");
-		expect(
-			messages.some((m) => m.includes("extra") && m.includes("unmanaged")),
-		).toBe(true);
+		expect(events).toContainEqual({
+			kind: DiffEventKind.UNMANAGED,
+			resource: ResourceType.ROLE,
+			name: "extra",
+		});
 	});
 
 	it("warns about duplicate guild role names and uses the first occurrence", () => {
@@ -220,9 +228,13 @@ describe("Differ.diff — roles", () => {
 		const second = makeRole({ id: "id-second", name: "mod", color: 0x00ff00 });
 
 		const guildState = makeGuildState([first, second]);
-		const { actions, messages } = new Differ(bp).diff(guildState);
+		const { actions, events } = new Differ(bp).diff(guildState);
 
-		expect(messages.some((m) => m.includes("duplicate name"))).toBe(true);
+		expect(events).toContainEqual({
+			kind: DiffEventKind.DUPLICATE,
+			resource: ResourceType.ROLE,
+			name: "mod",
+		});
 		// First occurrence matches blueprint color → no update
 		expect(actions).toHaveLength(0);
 	});

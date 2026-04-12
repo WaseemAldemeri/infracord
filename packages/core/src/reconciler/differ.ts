@@ -1,14 +1,15 @@
 import { Collection, type Role } from "discord.js";
 import type { Blueprint, RoleDef } from "../blueprint/index.js";
 import type { ServerContext } from "../blueprint/types/context.js";
-import { type Action, Actions } from "./types/action.js";
+import { type Action, Actions, ResourceType } from "./types/action.js";
+import { type DiffEvent, DiffEventKind } from "./types/diffEvent.js";
 import type { GuildState } from "./types/guildState.js";
 import type { ValidationError } from "./types/validationError.js";
 
-/** The result of a diff operation — a list of actions to apply and log messages describing the plan. */
+/** The result of a diff operation — actions to apply and structured events describing each decision. */
 export type DiffResult = {
 	actions: Action[];
-	messages: string[];
+	events: DiffEvent[];
 };
 
 /**
@@ -107,11 +108,7 @@ export class Differ {
 
 		return {
 			actions: [...roles.actions, ...categories.actions, ...channels.actions],
-			messages: [
-				...roles.messages,
-				...categories.messages,
-				...channels.messages,
-			],
+			events: [...roles.events, ...categories.events, ...channels.events],
 		};
 	}
 
@@ -157,15 +154,17 @@ export class Differ {
 
 	private diffRoles(guildState: GuildState): DiffResult {
 		const actions: Action[] = [];
-		const messages: string[] = [];
+		const events: DiffEvent[] = [];
 
 		// Re-key guild roles by name; discord.js keys them by snowflake ID
 		const guildRoles = new Collection<string, Role>();
 		for (const [, role] of guildState.roles) {
 			if (guildRoles.has(role.name)) {
-				messages.push(
-					`Role "${role.name}" has a duplicate name in the guild — using first occurrence, skipping subsequent`,
-				);
+				events.push({
+					kind: DiffEventKind.DUPLICATE,
+					resource: ResourceType.ROLE,
+					name: role.name,
+				});
 				continue;
 			}
 			guildRoles.set(role.name, role);
@@ -175,43 +174,43 @@ export class Differ {
 			const guildRole = guildRoles.get(name);
 
 			if (!guildRole) {
-				messages.push(
-					`Role "${name}" is defined in the blueprint but does not exist in the guild — will create`,
-				);
 				actions.push(Actions.createRoleAction(name, blueprintRole));
 				continue;
 			}
 
 			if (this.roleNeedsUpdate(blueprintRole, guildRole)) {
-				messages.push(
-					`Role "${name}" differs from the blueprint — will update`,
-				);
 				actions.push(
 					Actions.updateRoleAction(name, guildRole.id, blueprintRole),
 				);
 			} else {
-				messages.push(`Role "${name}" matches the blueprint — skipping`);
+				events.push({
+					kind: DiffEventKind.SKIP,
+					resource: ResourceType.ROLE,
+					name,
+				});
 			}
 		}
 
 		for (const [, role] of guildState.roles) {
 			if (!(role.name in this.blueprint.roles)) {
-				messages.push(
-					`Role "${role.name}" exists in the guild but is not defined in the blueprint — skipping (unmanaged)`,
-				);
+				events.push({
+					kind: DiffEventKind.UNMANAGED,
+					resource: ResourceType.ROLE,
+					name: role.name,
+				});
 			}
 		}
 
-		return { actions, messages };
+		return { actions, events };
 	}
 
 	// TODO: implement category diffing
 	private diffCategories(_guildState: GuildState): DiffResult {
-		return { actions: [], messages: [] };
+		return { actions: [], events: [] };
 	}
 
 	// TODO: implement channel diffing
 	private diffChannels(_guildState: GuildState): DiffResult {
-		return { actions: [], messages: [] };
+		return { actions: [], events: [] };
 	}
 }

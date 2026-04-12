@@ -48,11 +48,16 @@ export class Reconciler {
 	 */
 	public async reconcile(guild: Guild): Promise<void> {
 		const guildState = await this.buildGuildState(guild);
-		const { actions, messages } = this.differ.diff(guildState);
+		const { actions, events } = this.differ.diff(guildState);
 
-		for (const message of messages) {
-			console.log(`[reconciler] ${message}`);
+		// for now this loggs the events later on it will probably take a logger
+		for (const event of events) {
+			console.log(
+				`[reconciler] [differ] ${event.resource} "${event.name}": ${event.kind}`,
+			);
 		}
+
+		console.log(`[reconciler] [applier] Applying ${actions.length} actions`);
 
 		await this.applier.applyAll(actions);
 	}
