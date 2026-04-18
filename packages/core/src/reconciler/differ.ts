@@ -1,0 +1,241 @@
+import { Collection, type Role } from "discord.js";
+import type { Blueprint, RoleDef } from "../blueprint/index.js";
+import type { ServerContext } from "../blueprint/types/context.js";
+import { type Action, Actions, ResourceType } from "./types/action.js";
+import { type DiffEvent, DiffEventKind } from "./types/diffEvent.js";
+import type { GuildState } from "./types/guildState.js";
+import type { ValidationError } from "./types/validationError.js";
+
+/** The result of a diff operation — actions to apply and structured events describing each decision. */
+export type DiffResult = {
+	actions: Action[];
+	events: DiffEvent[];
+};
+
+export type DifferOptions = {
+	/**
+	 * When true, unmanaged resources (present in the guild but not declared in the
+	 * blueprint) emit DELETE actions instead of UNMANAGED events.
+	 * Defaults to false — unmanaged resources are left untouched.
+	 */
+	strict?: boolean;
+	/**
+	 * When true, duplicate guild resources (multiple resources sharing the same name)
+	 * emit DELETE actions for all occurrences after the first.
+	 * Defaults to false — duplicates are warned about but left untouched.
+	 */
+	deleteDuplicates?: boolean;
+};
+
+/**
+ * Computes the difference between a blueprint and a {@link GuildState} snapshot,
+ * producing a set of {@link Action}s that describe what needs to change.
+ *
+ * `Differ` is pure — it receives a pre-built `GuildState` at diff time and performs
+ * no I/O of its own. Fetching the live guild state is the responsibility of the caller
+ * (see {@link Reconciler}). The same instance can be reused across multiple guilds.
+ */
+export class Differ {
+	constructor(
+		private blueprint: Blueprint<ServerContext>,
+		private options: DifferOptions = {},
+	) {}
+
+	/**
+	 * Validates the blueprint for structural errors.
+	 * Called by {@link Reconciler} at construction time — a `Reconciler` built from
+	 * an invalid blueprint throws immediately rather than failing at reconcile time.
+	 *
+	 * @returns An array of {@link ValidationError}s. Empty means the blueprint is valid.
+	 */
+	public validate(): ValidationError[] {
+		const errors: ValidationError[] = [];
+
+		const roleNames = new Set<string>();
+		for (const roleName of Object.keys(this.blueprint.roles)) {
+			if (!roleName) {
+				errors.push({
+					code: "EMPTY_ROLE_NAME",
+					message:
+						"A role has an empty name — role names must be non-empty strings",
+				});
+				continue;
+			}
+			if (roleNames.has(roleName)) {
+				errors.push({
+					code: "DUPLICATE_ROLE_NAME",
+					message: `Role "${roleName}" is defined more than once`,
+				});
+			}
+			roleNames.add(roleName);
+		}
+
+		const categoryNames = new Set<string>();
+		const topLevelChannelNames = new Set<string>();
+
+		this.blueprint.structure.forEach((entry, i) => {
+			const catName = entry.category?.name;
+			if (catName !== undefined && !catName) {
+				errors.push({
+					code: "EMPTY_CATEGORY_NAME",
+					message: `Structure entry ${i} has a category with an empty name — category names must be non-empty strings`,
+				});
+			} else if (catName) {
+				if (categoryNames.has(catName)) {
+					errors.push({
+						code: "DUPLICATE_CATEGORY_NAME",
+						message: `Category "${catName}" is defined more than once`,
+					});
+				}
+				categoryNames.add(catName);
+			}
+
+			const scope = catName ? `category "${catName}"` : "top-level";
+			const channelNames = catName ? new Set<string>() : topLevelChannelNames;
+			for (const ch of entry.channels) {
+				if (!ch.name) {
+					errors.push({
+						code: "EMPTY_CHANNEL_NAME",
+						message: `A channel in ${scope} has an empty name — channel names must be non-empty strings`,
+					});
+					continue;
+				}
+				if (channelNames.has(ch.name)) {
+					errors.push({
+						code: "DUPLICATE_CHANNEL_NAME",
+						message: `Channel "${ch.name}" in ${scope} is defined more than once`,
+					});
+				}
+				channelNames.add(ch.name);
+			}
+		});
+
+		return errors;
+	}
+
+	/**
+	 * Computes the full set of {@link Action}s needed to bring the guild in line
+	 * with the blueprint, given a pre-built {@link GuildState} snapshot.
+	 *
+	 * @remarks Channel and category diffing is not yet implemented — only roles are diffed.
+	 */
+	public diff(guildState: GuildState): DiffResult {
+		const roles = this.diffRoles(guildState);
+		const categories = this.diffCategories(guildState);
+		const channels = this.diffChannels(guildState);
+
+		return {
+			actions: [...roles.actions, ...categories.actions, ...channels.actions],
+			events: [...roles.events, ...categories.events, ...channels.events],
+		};
+	}
+
+	/**
+	 * Returns true if any blueprint-defined field on `blueprintRole` differs from
+	 * the corresponding field on the live `guildRole`. Fields absent from the
+	 * blueprint are intentionally ignored — they are considered unmanaged.
+	 */
+	private roleNeedsUpdate(blueprintRole: RoleDef, guildRole: Role): boolean {
+		if (
+			blueprintRole.colors !== undefined &&
+			(blueprintRole.colors.primaryColor !== guildRole.colors.primaryColor ||
+				(blueprintRole.colors.secondaryColor !== undefined &&
+					blueprintRole.colors.secondaryColor !==
+						guildRole.colors.secondaryColor) ||
+				(blueprintRole.colors.tertiaryColor !== undefined &&
+					blueprintRole.colors.tertiaryColor !==
+						guildRole.colors.tertiaryColor))
+		) {
+			return true;
+		}
+
+		if (
+			// color (deprecated) — to be replaced with colors once confirmed safe
+			(blueprintRole.color !== undefined &&
+				blueprintRole.color !== guildRole.color) ||
+			(blueprintRole.hoist !== undefined &&
+				blueprintRole.hoist !== guildRole.hoist) ||
+			(blueprintRole.mentionable !== undefined &&
+				blueprintRole.mentionable !== guildRole.mentionable) ||
+			(blueprintRole.position !== undefined &&
+				blueprintRole.position !== guildRole.position) ||
+			(blueprintRole.unicodeEmoji !== undefined &&
+				blueprintRole.unicodeEmoji !== guildRole.unicodeEmoji) ||
+			(blueprintRole.permissions !== undefined &&
+				!guildRole.permissions.equals(blueprintRole.permissions))
+		) {
+			return true;
+		}
+
+		return false;
+	}
+
+	private diffRoles(guildState: GuildState): DiffResult {
+		const actions: Action[] = [];
+		const events: DiffEvent[] = [];
+
+		// Re-key guild roles by name; discord.js keys them by snowflake ID
+		const guildRoles = new Collection<string, Role>();
+		for (const [, role] of guildState.roles) {
+			if (guildRoles.has(role.name)) {
+				events.push({
+					kind: DiffEventKind.DUPLICATE,
+					resource: ResourceType.ROLE,
+					name: role.name,
+				});
+				if (this.options.deleteDuplicates) {
+					actions.push(Actions.deleteRoleAction(role.name, role.id));
+				}
+				continue;
+			}
+			guildRoles.set(role.name, role);
+		}
+
+		for (const [name, blueprintRole] of Object.entries(this.blueprint.roles)) {
+			const guildRole = guildRoles.get(name);
+
+			if (!guildRole) {
+				actions.push(Actions.createRoleAction(name, blueprintRole));
+				continue;
+			}
+
+			if (this.roleNeedsUpdate(blueprintRole, guildRole)) {
+				actions.push(
+					Actions.updateRoleAction(name, guildRole.id, blueprintRole),
+				);
+			} else {
+				events.push({
+					kind: DiffEventKind.SKIP,
+					resource: ResourceType.ROLE,
+					name,
+				});
+			}
+		}
+
+		for (const [, role] of guildState.roles) {
+			if (!(role.name in this.blueprint.roles)) {
+				if (this.options.strict) {
+					actions.push(Actions.deleteRoleAction(role.name, role.id));
+				} else {
+					events.push({
+						kind: DiffEventKind.UNMANAGED,
+						resource: ResourceType.ROLE,
+						name: role.name,
+					});
+				}
+			}
+		}
+
+		return { actions, events };
+	}
+
+	// TODO: implement category diffing
+	private diffCategories(_guildState: GuildState): DiffResult {
+		return { actions: [], events: [] };
+	}
+
+	// TODO: implement channel diffing
+	private diffChannels(_guildState: GuildState): DiffResult {
+		return { actions: [], events: [] };
+	}
+}

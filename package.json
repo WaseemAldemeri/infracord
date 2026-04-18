@@ -1,20 +1,20 @@
 {
-  "name": "infracord-root",
-  "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
-  "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/WaseemAldemeri/infracord.git"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.9",
-    "adr-tool": "^0.3.0",
-    "typescript": "^6.0.2"
-  }
+	"name": "infracord-root",
+	"private": true,
+	"workspaces": [
+		"packages/*"
+	],
+	"scripts": {
+		"build": "npm run build --workspaces --if-present",
+		"typecheck": "npm run typecheck --workspaces --if-present"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/WaseemAldemeri/infracord.git"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.9",
+		"adr-tool": "^0.3.0",
+		"typescript": "^6.0.2"
+	}
 }
