@@ -50,23 +50,36 @@ Any significant architectural or design decision gets an ADR in `docs/adr/` befo
 
 Never push directly to `main`. The flow is:
 
-1. Create `feat/<name>` or `fix/<name>` from `main`
-2. Do all work on the branch
-3. Merge to `main` via a PR when the feature is complete and tests pass
+1. Check open issues with `gh issue list` — every feature needs a tracked issue
+2. Create `feat/<name>` or `fix/<name>` from `main`
+3. Do all work on the branch
+4. Merge to `main` via a PR when the feature is complete and tests pass
 
 `main` should always be in a working state.
 
 ### TDD
 
-Follow RED → GREEN → REFACTOR when adding new behaviour:
+Follow RED → GREEN → REFACTOR when adding new behaviour, always on a branch:
 
-**RED** — Create the source file with functions/classes/methods stubbed out (empty bodies or `throw new Error('not implemented')`). Write the test file importing from it. Tests fail because implementation is empty. Commit.
+**RED** — Create the source file with functions/classes/methods stubbed out (empty bodies or `throw new Error('not implemented')`). Write the test file importing from it. Tests fail because implementation is empty. Prompt the developer to commit before moving on.
 
-**GREEN** — Implement until tests pass. Commit.
+**GREEN** — Implement until tests pass. Prompt the developer to commit before moving on.
 
-**REFACTOR** — Clean up without changing behaviour. Tests must still pass. Commit if there are meaningful changes.
+**REFACTOR** — Clean up without changing behaviour. Tests must still pass. Prompt the developer to commit if there are meaningful changes.
 
 TDD matters most when introducing a new module, class, or non-trivial function. Small additions to existing code can be a single commit.
+
+### Claude tracking
+
+At the start of any feature or fix session, Claude must track:
+- The branch name (e.g. `feat/channel-diffing`)
+- The issue number (e.g. `#3`)
+
+After each TDD phase completes, Claude must prompt:
+
+> "RED is done — we're on branch `feat/<name>` (issue #N). Want me to commit, or do you want to review first?"
+
+Never proceed to the next phase without the developer confirming the commit. Never commit, push, or open a PR without being explicitly asked.
 
 ## Testing
 
