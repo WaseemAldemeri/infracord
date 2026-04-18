@@ -165,7 +165,7 @@ Users are responsible for choosing unique IDs and prefixes across all features. 
 
 ```
 src/
-  blueprint.ts     — defineRoles, defineChannels, createBlueprint — exported
+  blueprint.ts     — defineRoles, createBlueprint — exported
   ic.ts            — createIc(blueprint) — exported
   client.ts        — new InfracordClient({ blueprint, features })
   features/
